@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 frame.py
 
@@ -177,3 +178,5 @@ class APIFrame:
         self.data = data
         if not self.verify(chksum):
             raise ValueError("Invalid checksum")
+	if not len( self.data ) > 0:
+	    raise ValueError("Data frame too short")

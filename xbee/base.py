@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 xbee.py
 
@@ -20,6 +21,12 @@ class ThreadQuitException(Exception):
     
 class CommandFrameException(KeyError):
     pass
+
+class XBeeError(Exception):
+  def __init__(self, value):
+    self.value = value
+  def __str__(self):
+    return repr(self.value)
 
 class XBeeBase(threading.Thread):
     """
@@ -55,10 +62,16 @@ class XBeeBase(threading.Thread):
         self._callback = None
         self._thread_continue = False
         self._escaped = escaped  
-        
+
+        self.error_string_index = 0
+        self.error_ok_index = 0
+        self.error_gibberish_index = 0
+        self.hasXBeeError = False
+
         if callback:
             self._callback = callback
             self._thread_continue = True
+            self._thread_quit = threading.Event()            
             self.start()
 
     def halt(self):
@@ -71,7 +84,9 @@ class XBeeBase(threading.Thread):
         """
         if self._callback:
             self._thread_continue = False
-            self.join()
+            #self.join()
+            self._thread_quit.wait()
+            
         
     def _write(self, data):
         """
@@ -95,6 +110,51 @@ class XBeeBase(threading.Thread):
                 self._callback(self.wait_read_frame())
             except ThreadQuitException:
                 break
+            except XBeeError as detail:
+		print( "XBee Error!", detail )
+		self.hasXBeeError = True
+		#self.halt()
+		break
+	self._thread_quit.set()
+
+    def _check_for_error(self, newbyte ):
+      # check whether it types ERROR\r
+      if self.error_string_index == 0 and newbyte == 'E':
+	self.error_string_index = self.error_string_index + 1
+      elif self.error_string_index > 0:
+	if self.error_string_index < 3  and newbyte == 'R':
+	  self.error_string_index = self.error_string_index + 1
+	elif self.error_string_index == 3 and newbyte == 'O':
+	  self.error_string_index = self.error_string_index + 1
+	elif self.error_string_index == 4 and newbyte == 'R':
+	  self.error_string_index = self.error_string_index + 1
+	elif self.error_string_index == 5 and newbyte == '\r':
+	  self.error_string_index = 0
+	  raise XBeeError( "XBee is confused - error" )
+	else:
+	  self.error_string_index = 0
+      else:
+	self.error_string_index = 0
+	# check whether it types OK\r
+	if self.error_ok_index == 0 and newbyte == 'O':
+	  self.error_ok_index = self.error_ok_index + 1
+	elif self.error_ok_index > 0:
+	  if self.error_ok_index == 1  and newbyte == 'K':
+	    self.error_ok_index = self.error_ok_index + 1
+	  elif self.error_ok_index == 2 and newbyte == '\r':
+	    #self.errorindex = self.errorindex + 1
+	    self.error_ok_index = 0
+	    raise XBeeError( "XBee is confused - ok" )
+	  else:
+	    self.error_ok_index = 0
+	else:
+	  self.error_ok_index = 0
+	  if newbyte == '\x00' or newbyte == '\xe0':
+	    self.error_gibberish_index = self.error_gibberish_index + 1
+	    if self.error_gibberish_index > 10:
+	      raise XBeeError( "XBee is confused - gibberish" )
+	  else:
+	    self.error_gibberish_index = 0
     
     def _wait_for_frame(self):
         """
@@ -119,6 +179,7 @@ class XBeeBase(threading.Thread):
                     continue
                 
                 byte = self.serial.read()
+                self._check_for_error( byte )
 
                 if byte != APIFrame.START_BYTE:
                     continue
@@ -207,6 +268,10 @@ class XBeeBase(threading.Thread):
         names for each segment of binary data as specified in the 
         api_responses spec.
         """
+        
+        if len(data) < 1:
+            raise ValueError( "Response packet was shorter than expected; expected, got: %d bytes" % (len(data)))
+
         # Fetch the first byte, identify the packet
         # If the spec doesn't exist, raise exception
         packet_id = data[0:1]
@@ -342,8 +407,9 @@ class XBeeBase(threading.Thread):
         # split the sample data into a list, so it can be pop()'d
         sample_bytes = [byteToInt(c) for c in io_bytes[header_size:]]
         
-        # repeat for every sample provided
-        for sample_ind in range(0, sample_count):
+        if len( sample_bytes ) > 0:
+	  # repeat for every sample provided
+	  for sample_ind in range(0, sample_count):
             tmp_samples = {}
             
             if dio_chans:
