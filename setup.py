@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from distutils.core import setup
 
 packages=[
@@ -10,7 +11,7 @@ packages=[
 
 setup(
     name='XBee',
-    version='2.0.0',
+    version='2.0.1',
     author='Paul Malmsten',
     author_email='pmalmsten@gmail.com',
     packages=packages,
